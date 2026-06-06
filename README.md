@@ -6,5 +6,5 @@
 
 ex01：基础HelloWorld程序
 
-版本2：新增input键盘输入交互功能
+版本2：新增scanf键盘输入交互功能
 
