@@ -1,84 +1,91 @@
 /*
- * ESP32 SOS信号 - 使用millis()函数
- * SOS信号：连续三次短闪，三次长闪，再三次短闪
- * 正确实现：每个亮和灭的状态都有独立的持续时间
+ * 简化版 - 更清晰的SOS信号
+ * 使用标志位更直观地控制
  */
 
-const int LED_PIN = 2;  // ESP32板载LED在GPIO2
+const int LED_PIN = 2;
 
-// 时间常量（单位：毫秒）
-const unsigned long SHORT_FLASH = 200;    // 短闪持续时间
-const unsigned long LONG_FLASH = 600;     // 长闪持续时间  
-const unsigned long PAUSE_SHORT = 200;    // 闪烁间熄灭
-const unsigned long PAUSE_LETTER = 600;   // 字母间熄灭
-const unsigned long PAUSE_WORD = 1400;    // 单词间熄灭
+// 时间常量
+const unsigned long SHORT = 200;
+const unsigned long LONG = 600;
+const unsigned long GAP = 200;      // 点/横之间
+const unsigned long LETTER_GAP = 600; // 字母之间
+const unsigned long WORD_GAP = 1400;  // 单词之间
 
-// 使用数组存储每个步骤的状态和持续时间
-// 偶数索引：亮的状态，奇数索引：灭的状态
-const unsigned long sosTiming[] = {
-  // S: 三个短闪 (亮-灭-亮-灭-亮-灭)
-  SHORT_FLASH, PAUSE_SHORT,   // 第1个短闪
-  SHORT_FLASH, PAUSE_SHORT,   // 第2个短闪
-  SHORT_FLASH, PAUSE_LETTER,  // 第3个短闪 + 字母间灭600ms
-  
-  // O: 三个长闪 (亮-灭-亮-灭-亮-灭)
-  LONG_FLASH, PAUSE_SHORT,    // 第1个长闪
-  LONG_FLASH, PAUSE_SHORT,    // 第2个长闪
-  LONG_FLASH, PAUSE_LETTER,   // 第3个长闪 + 字母间灭600ms
-  
-  // S: 三个短闪 (亮-灭-亮-灭-亮-灭)
-  SHORT_FLASH, PAUSE_SHORT,   // 第1个短闪
-  SHORT_FLASH, PAUSE_SHORT,   // 第2个短闪
-  SHORT_FLASH, PAUSE_WORD     // 第3个短闪 + 单词间灭1400ms
+// 状态定义
+enum SOSState {
+  S1_ON, S1_OFF,  // S第一个点
+  S2_ON, S2_OFF,  // S第二个点
+  S3_ON, S3_OFF,  // S第三个点
+  LETTER1_OFF,    // S和O之间
+  O1_ON, O1_OFF,  // O第一个横
+  O2_ON, O2_OFF,  // O第二个横
+  O3_ON, O3_OFF,  // O第三个横
+  LETTER2_OFF,    // O和S之间
+  S4_ON, S4_OFF,  // S第一个点
+  S5_ON, S5_OFF,  // S第二个点
+  S6_ON, S6_OFF,  // S第三个点
+  WORD_OFF        // 单词之间
 };
 
-const int TOTAL_STEPS = sizeof(sosTiming) / sizeof(sosTiming[0]);
-int currentStep = 0;
-unsigned long previousMillis = 0;
-bool ledState = false;
+SOSState currentState = S1_ON;
+unsigned long lastChange = 0;
+
+// 获取当前状态的持续时间
+unsigned long getDuration(SOSState state) {
+  switch(state) {
+    case S1_ON: case S2_ON: case S3_ON: case S4_ON: case S5_ON: case S6_ON:
+      return SHORT;
+    case O1_ON: case O2_ON: case O3_ON:
+      return LONG;
+    case S1_OFF: case S2_OFF: case S3_OFF: case S4_OFF: case S5_OFF: case S6_OFF:
+    case O1_OFF: case O2_OFF: case O3_OFF:
+      return GAP;
+    case LETTER1_OFF: case LETTER2_OFF:
+      return LETTER_GAP;
+    case WORD_OFF:
+      return WORD_GAP;
+    default:
+      return GAP;
+  }
+}
+
+// 获取下一个状态
+SOSState getNextState(SOSState state) {
+  int next = (int)state + 1;
+  if (next > WORD_OFF) next = S1_ON;
+  return (SOSState)next;
+}
 
 void setup() {
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-  
   Serial.begin(115200);
-  Serial.println("=== SOS Signal Started ===");
+  Serial.println("SOS Signal Started...");
 }
 
 void loop() {
-  unsigned long currentMillis = millis();
+  unsigned long now = millis();
   
-  // 检查当前步骤是否完成
-  if (currentMillis - previousMillis >= sosTiming[currentStep]) {
-    previousMillis = currentMillis;
+  if (now - lastChange >= getDuration(currentState)) {
+    lastChange = now;
     
-    // 切换到下一个步骤
-    currentStep++;
+    // 设置LED状态
+    bool ledOn = (currentState == S1_ON || currentState == S2_ON || currentState == S3_ON ||
+                  currentState == O1_ON || currentState == O2_ON || currentState == O3_ON ||
+                  currentState == S4_ON || currentState == S5_ON || currentState == S6_ON);
     
-    // 如果完成所有步骤，重新开始
-    if (currentStep >= TOTAL_STEPS) {
-      currentStep = 0;
-      Serial.println("=== SOS Cycle Complete ===");
-    }
+    digitalWrite(LED_PIN, ledOn ? HIGH : LOW);
     
-    // 切换LED状态（亮/灭交替）
-    ledState = !ledState;
-    digitalWrite(LED_PIN, ledState ? HIGH : LOW);
-    
-    // 打印调试信息
-    if (ledState) {
-      if (sosTiming[currentStep] == SHORT_FLASH) {
-        Serial.print(".");
-      } else if (sosTiming[currentStep] == LONG_FLASH) {
-        Serial.print("-");
-      }
+    // 调试输出
+    if (ledOn) {
+      if (getDuration(currentState) == SHORT) Serial.print(".");
+      else Serial.print("-");
     } else {
-      if (sosTiming[currentStep] == PAUSE_LETTER) {
-        Serial.print(" / ");
-      } else if (sosTiming[currentStep] == PAUSE_WORD) {
-        Serial.println("  [SOS]");
-      }
-      // PAUSE_SHORT 不打印，保持简洁
+      if (getDuration(currentState) == LETTER_GAP) Serial.print(" / ");
+      else if (getDuration(currentState) == WORD_GAP) Serial.println("  [SOS]\n");
     }
+    
+    // 切换到下一个状态
+    currentState = getNextState(currentState);
   }
 }
